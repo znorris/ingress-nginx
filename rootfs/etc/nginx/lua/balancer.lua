@@ -6,6 +6,7 @@ local configuration = require("configuration")
 local round_robin = require("balancer.round_robin")
 local chash = require("balancer.chash")
 local sticky = require("balancer.sticky")
+local sticky_arg = require("balancer.sticky_arg")
 local ewma = require("balancer.ewma")
 
 -- measured in seconds
@@ -18,6 +19,7 @@ local IMPLEMENTATIONS = {
   round_robin = round_robin,
   chash = chash,
   sticky = sticky,
+  sticky_arg = sticky_arg,
   ewma = ewma,
 }
 
@@ -29,6 +31,8 @@ local function get_implementation(backend)
 
   if backend["sessionAffinityConfig"] and backend["sessionAffinityConfig"]["name"] == "cookie" then
     name = "sticky"
+  elseif backend["sessionAffinityConfig"] and backend["sessionAffinityConfig"]["name"] == "arg" then
+    name = "sticky_arg"
   elseif backend["upstream-hash-by"] then
     name = "chash"
   end
