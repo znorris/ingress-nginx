@@ -1,6 +1,7 @@
 local balancer_resty = require("balancer.resty")
 local resty_chash = require("resty.chash")
 local util = require("util")
+local ck = require("resty.cookie")
 
 local _M = balancer_resty:new({ factory = resty_chash, name = "sticky_arg" })
 
@@ -37,6 +38,25 @@ local function encrypted_endpoint_string(self, endpoint_string)
   return encrypted
 end
 
+local function set_cookie(self, value)
+  local cookie, err = ck:new()
+  if not cookie then
+    ngx.log(ngx.ERR, err)
+  end
+
+  local ok
+  ok, err = cookie:set({
+    key = self.cookie_name,
+    value = value,
+    path = ngx.var.location_path,
+    domain = ngx.var.host,
+    httponly = true,
+  })
+  if not ok then
+    ngx.log(ngx.ERR, err)
+  end
+end
+
 local function get_args()
   local args, err = ngx.req.get_uri_args()
   if err == "truncated" then
@@ -68,16 +88,32 @@ local function pick_random(instance)
 end
 
 function _M.balance(self)
-  local key = get_session_key(self)
-  -- Case 1: Key on request, lookup key
-  if not key then
-    -- Case 2: No key on request, pick a random backend
-    -- Future iterations could optionally return a redirect
-    -- which includes a new session in the URI args.
-    local tmp_endpoint = pick_random(self.instance)
-    key = encrypted_endpoint_string(self, tmp_endpoint)
+  local cookie_key = cookie:get(self.cookie_name)
+  local arg_key = get_session_key(self)
+  local tmp_endpoint
+  local new_key
+
+  if not arg_key and not cookie_key then
+    -- Case 1: no arg, no cookie
+    -- pick random backend
+    -- set cookie
+    tmp_endpoint = pick_random(self.instance)
+    new_key = encrypted_endpoint_string(self, tmp_endpoint) 
+    set_cookie(self, new_key)
+    return self.instance:find(new_key)
+  elseif arg_key and not cookie_key then
+    -- Case 2: arg, no cookie
+    -- lookup backend
+    return self.instance:find(arg_key)
+  elseif not arg_key and cookie_key then
+    -- Case 3: no arg, cookie
+    -- lookup backend
+    return self.intance:find(cookie_key)
+  elseif arg_key and cookie_key then
+    -- Case 4: arg, cookie
+    -- lookup backend by arg
+    return self.instance:find(arg_key)
   end
-  return self.instance:find(key)
 end
 
 return _M
